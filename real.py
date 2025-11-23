@@ -44,7 +44,7 @@ class TestCallback(Callback):
 
         
         #Directional Accuracy CoMatrix
-        for i in range(0,299):
+        for i in range(len(act)-1):
             if act[i]>act[i+1] and act[i]<pred[i+1]:
                  b=b+1
                 
@@ -70,11 +70,21 @@ class TestCallback(Callback):
 
         
         
-dataset = pd.read_csv('5data.csv')
-# index is dropped
-dataset = dataset.drop(dataset.index[0])
-# date axis is dropped using drop function
-dataset = dataset.drop(['date'], axis=1)
+col_names = [
+    'date', 'close', 'open', 'high', 'low',
+    'open_t-1', 'high_t-1', 'low_t-1',
+    'open_t-2', 'high_t-2', 'low_t-2',
+    'open_t-3', 'high_t-3', 'low_t-3',
+    'open_t-4', 'high_t-4', 'low_t-4'
+]
+dataset = pd.read_csv('5data.csv', header=0, names=col_names)
+
+# The original script drops the first row, which seems unnecessary.
+# If there was a specific reason, you might need to re-introduce it.
+# dataset = dataset.drop(dataset.index[0]) 
+
+# date axis is dropped using drop function, it's good practice to set it as index
+dataset.set_index('date', inplace=True)
 # iloc is used for index where loc is used for label
 data = dataset.iloc[:, 1:]
 cl = dataset.iloc[:, 0]
@@ -87,30 +97,36 @@ scl = MinMaxScaler()
 cl = cl.values.reshape(cl.shape[0],1)
 cl = scl.fit_transform(cl)
 
+# For time series, we should not shuffle and split manually to keep order.
+test_size_fraction = 0.023728545
+test_size = int(len(data) * test_size_fraction)
+train_size = len(data) - test_size
 
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(data, cl,test_size=0.023728545, shuffle=False)
-
+X_train = data[:train_size]
+X_test = data[train_size:]
+y_train = cl[:train_size]
+y_test = cl[train_size:]
 
 print("X_train:", X_train.shape)
 print("X_test:", X_test.shape)
 print("y_train:", y_train.shape)
-print("y_:", y_test.shape)
+print("y_test:", y_test.shape)
 
 start = time.time()
 model = Sequential()
-model.add(Bidirectional(LSTM(64,return_sequences = True,input_shape=(15,1))))
+model.add(LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)))
 model.add(Dropout(0.2))
-model.add(Bidirectional(LSTM(16,return_sequences = True)))
-model.add(Dropout(0.2))
-model.add(Bidirectional(LSTM(64,return_sequences = False)))
+model.add(LSTM(50, return_sequences=False))
 model.add(Dropout(0.2))
 model.add(Dense(1))
-model.add(Activation('tanh'))
+# Using a linear activation for the output layer is better for regression.
+# 'tanh' limits output to [-1, 1], which might constrain predictions.
+model.add(Activation('linear'))
 model.compile(optimizer='adam',loss='mean_squared_error')
+epochs_count = 200
 X_train = X_train.reshape((X_train.shape[0],X_train.shape[1],1))
 X_test = X_test.reshape((X_test.shape[0],X_test.shape[1],1))
-history=model.fit(X_train, y_train,epochs=100,batch_size=2,validation_data=(X_train, y_train),callbacks=[TestCallback((X_test, y_test))])
+history=model.fit(X_train, y_train,epochs=epochs_count,batch_size=2,validation_data=(X_train, y_train),callbacks=[TestCallback((X_test, y_test))])
 model.save('lstm_model.h5')
 print("Model saved as lstm_model.h5")
 Xt = model.predict(X_test)
@@ -122,7 +138,7 @@ total=0
 for i in range (0,len(myArr)):
 	total=total+myArr[i]
     
-average=total/100 
+average=total/epochs_count 
 print('Total Directional Accuracy is : ',average)
 
 print('Test Score: %.2f RMSE' % (testScore))
@@ -145,6 +161,3 @@ plt.title('Directional Accuracy')
 plt.ylabel('Accuracy')
 plt.xlabel('Epoch')
 plt.show()
-
-
-
